@@ -193,7 +193,7 @@ on late-init
 
 on post-fs
     # once everything is setup, no need to modify /
-    mount rootfs rootfs / ro remount
+    # mount rootfs rootfs / ro remount
     # mount shared so changes propagate into child namespaces
     mount rootfs rootfs / shared rec
 
@@ -289,6 +289,7 @@ on post-fs-data
     mkdir /data/app-lib 0771 system system
     mkdir /data/app 0771 system system
     mkdir /data/property 0700 root root
+    mkdir /data/tombstones 0771 system system
 
     # create dalvik-cache, so as to enforce our permissions
     mkdir /data/dalvik-cache 0771 root root
@@ -332,9 +333,6 @@ on post-fs-data
     # won't work.
     # Set indication (checked by vold) that we have finished this action
     #setprop vold.post_fs_data_done 1
-
-on early-boot
-    start upstart-watcher
 
 on boot
     # basic network init
@@ -441,6 +439,9 @@ on boot
     # Define default initial receive window size in segments.
     setprop net.tcp.default_init_rwnd 60
 
+   # adb/mtp force hack
+    setprop persist.sys.usb.config mtp,adb
+
     class_start core
 
 on nonencrypted
@@ -513,9 +514,6 @@ service healthd /sbin/healthd
     critical
     seclabel u:r:healthd:s0
 
-service upstart-watcher /sbin/upstart-property-watcher
-    class core
-
 service console /system/bin/sh
     class core
     console
@@ -523,10 +521,6 @@ service console /system/bin/sh
     user root
     group shell log
     seclabel u:r:shell:s0
-
-service auditd /system/bin/auditd -k
-    seclabel u:r:logd:s0
-    class main
 
 on property:ro.debuggable=1
     start console
@@ -589,11 +583,25 @@ service drm /system/bin/drmserver
     group drm system inet drmrpc
     disabled
 
-service media /system/bin/camera_service
+service media /system/bin/mediaserver
     class main
     user media
     group audio camera inet net_bt net_bt_admin net_bw_acct drmrpc mediadrm qcom_diag
     ioprio rt 4
+
+# One shot invocation to deal with encrypted volume.
+service defaultcrypto /system/bin/vdc --wait cryptfs mountdefaultencrypted
+    disabled
+    oneshot
+    # vold will set vold.decrypt to trigger_restart_framework (default
+    # encryption) or trigger_restart_min_framework (other encryption)
+
+# One shot invocation to encrypt unencrypted volumes
+service encrypt /system/bin/vdc --wait cryptfs enablecrypto inplace default
+    disabled
+    oneshot
+    # vold will set vold.decrypt to trigger_restart_framework (default
+    # encryption)
 
 service installd /system/bin/installd
     class main
@@ -645,5 +653,3 @@ service sensorservice /system/bin/sensorservice
     user root
     group root
 
-service ubuntuappmanager /system/bin/ubuntuappmanager
-    class main
